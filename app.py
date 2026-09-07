@@ -14,7 +14,16 @@ st.set_page_config(
 )
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_FILE = BASE_DIR / "data" / "2gis_all_malls_company_details.xlsx"
+WORKBOOK_NAME = "2gis_all_malls_company_details.xlsx"
+WORKBOOK_CANDIDATES = [
+    BASE_DIR / "data" / WORKBOOK_NAME,
+    BASE_DIR / WORKBOOK_NAME,
+]
+
+
+def bundled_workbook():
+    """Return the workbook wherever it was placed in the deployed repository."""
+    return next((path for path in WORKBOOK_CANDIDATES if path.is_file()), None)
 
 
 def clean_text(value):
@@ -84,7 +93,19 @@ st.markdown("""
 with st.sidebar:
     st.subheader("Data source")
     uploaded = st.file_uploader("Replace the Excel workbook", type=["xlsx"])
-    source = uploaded if uploaded is not None else DEFAULT_FILE
+    default_file = bundled_workbook()
+    source = uploaded if uploaded is not None else default_file
+
+if source is None:
+    st.warning(
+        "The mall workbook is not included in this deployment. "
+        "Upload **2gis_all_malls_company_details.xlsx** in the sidebar to continue."
+    )
+    st.info(
+        "For a permanent Render deployment, commit the workbook at "
+        "`data/2gis_all_malls_company_details.xlsx` in the same GitHub repository as `app.py`."
+    )
+    st.stop()
 
 try:
     malls, companies = load_data(source)
