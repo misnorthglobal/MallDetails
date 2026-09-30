@@ -40,17 +40,9 @@ streamlit run app.py
 ## Deploy on Render
 
 1. Create a new GitHub repository and upload every file in this folder, including the `data` folder.
-   Confirm that GitHub shows `data/2gis_all_malls_company_details.xlsx` before deploying.
 2. In Render, select **New → Blueprint**.
 3. Connect the GitHub repository.
 4. Render reads `render.yaml`; approve the web service and deploy.
 5. After deployment, open the generated `onrender.com` URL.
 
 No database or environment variable is required for this Excel-backed version.
-
-## If Render says the workbook is missing
-
-Render only receives files committed to GitHub. In the GitHub repository, select
-**Add file → Upload files**, upload `data/2gis_all_malls_company_details.xlsx`,
-commit the change, and redeploy. The app also accepts the workbook in the project
-root and allows a temporary upload through its sidebar.
