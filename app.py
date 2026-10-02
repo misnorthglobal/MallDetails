@@ -171,9 +171,11 @@ def main():
     mall_cols = ['Mall Number', 'Name', 'Emirates', 'Status', 'Approximate Size', 'Size (sq ft)', 'Size Range',
                  'Property Owner', 'Confidence', 'Total Parking', 'Floors', 'Companies', 'Extracted records', 'Remarks', 'Location', 'Link']
     with tabs[0]:
-        first, second = st.columns(2)
+        first, second, third = st.columns(3)
         first.metric('Total malls', f'{len(fm):,}')
         second.metric('Coming-soon malls', f'{fm.Status.eq("Coming soon").sum():,}')
+
+        third.metric('Company records', f'{len(pool):,}')
 
         st.subheader('Malls by emirate')
         emirates = (fm.assign(Emirates=fm['Emirates'].replace('', 'Not specified'))
@@ -182,33 +184,50 @@ def main():
         emirates = pd.concat([emirates, pd.DataFrame([{'Emirates': 'Total', 'Mall count': len(fm)}])], ignore_index=True)
         table(emirates, 'overview_emirates', 320)
 
-        st.subheader('Malls by property owner')
+        st.subheader('Top 10 property owners by mall count')
         owners = fm.assign(**{'Property Owner': fm['Property Owner'].replace('', 'Not publicly disclosed'),
                              'Coming-soon count': fm['Status'].eq('Coming soon').astype(int)})
         owners = (owners.groupby('Property Owner').agg(
             **{'Mall count': ('Mall Number', 'size'), 'Coming-soon count': ('Coming-soon count', 'sum')})
             .reset_index().sort_values(['Mall count', 'Property Owner'], ascending=[False, True]))
-        table(owners, 'overview_owners')
+        table(owners.head(10), 'overview_owners')
 
-        st.subheader('Malls by company count')
+        st.subheader('Top 10 malls by company count')
         ranking = fm.sort_values(['Extracted records', 'Name'], ascending=[False, True]).copy()
         ranking['Company records'] = ranking['Extracted records'].astype(object)
         ranking.loc[ranking['Status'].eq('Coming soon') & ranking['Extracted records'].eq(0), 'Company records'] = 'Not available'
         ranking = ranking.rename(columns={'Name': 'Mall name', 'Emirates': 'Emirate', 'Property Owner': 'Property owner'})
-        table(ranking[['Mall name', 'Emirate', 'Property owner', 'Status', 'Company records']], 'overview_company_counts', 550)
+        table(ranking.head(10)[['Mall name', 'Emirate', 'Property owner', 'Status', 'Company records']], 'overview_company_counts', 550)
         st.caption('Company count means extracted listing records. Coming-soon malls without records show Not available.')
+        st.subheader('Top 10 malls by approximate size')
+        table(fm.nlargest(10, 'Size (sq ft)')[['Name', 'Emirates', 'Status', 'Approximate Size', 'Size Range']], 'overview_size')
     with tabs[1]:
-        sort_col = st.selectbox('Sort by', ['Size (sq ft)', 'Extracted records', 'Total Parking', 'Floors', 'Name'], key='f_sort')
+        sort_col = st.selectbox('Sort by', ['Extracted records', 'Size (sq ft)', 'Total Parking', 'Floors', 'Name'], key='f_sort')
         ascending = st.checkbox('Ascending order', key='f_ascending')
         table(fm.sort_values(sort_col, ascending=ascending, na_position='last')[mall_cols], 'mall_rankings')
     with tabs[2]:
-        if fm.empty:
+        st.subheader('Property owners')
+        owner_data = fm.assign(**{'Property Owner': fm['Property Owner'].replace('', 'Not publicly disclosed'),
+                                 'Coming soon': fm['Status'].eq('Coming soon').astype(int)})
+        owner_summary = owner_data.groupby('Property Owner').agg(
+            **{'Mall count': ('Mall Number', 'size'), 'Company records': ('Extracted records', 'sum'),
+               'Coming-soon malls': ('Coming soon', 'sum')}).reset_index().sort_values('Mall count', ascending=False)
+        table(owner_summary, 'explorer_owners')
+        st.caption('Company records are listings inside the owner’s malls, not businesses legally owned by the owner.')
+        st.subheader('Malls and company records by emirate')
+        emirate_summary = fm.groupby('Emirates').agg(**{'Mall count': ('Mall Number', 'size'),
+            'Company records': ('Extracted records', 'sum')}).reset_index().sort_values('Mall count', ascending=False)
+        table(emirate_summary, 'explorer_emirates')
+        chosen_owner = st.selectbox('Explore property owner', ['All owners'] + owner_summary['Property Owner'].tolist(), key='f_exploreowner')
+        explore = fm if chosen_owner == 'All owners' else fm[fm['Property Owner'].replace('', 'Not publicly disclosed').eq(chosen_owner)]
+        table(explore[mall_cols], 'owner_malls')
+        if explore.empty:
             st.info('No matching malls.')
         else:
-            ids = fm['Mall Number'].tolist()
-            labels = fm.set_index('Mall Number').apply(lambda r: f'{r["Name"]} — {r["Emirates"]}', axis=1).to_dict()
+            ids = explore['Mall Number'].tolist()
+            labels = explore.set_index('Mall Number').apply(lambda r: f'{r["Name"]} — {r["Emirates"]}', axis=1).to_dict()
             ident = st.selectbox('Choose mall', ids, format_func=lambda x: labels[x], key='f_explorer')
-            row = fm[fm['Mall Number'].eq(ident)].iloc[0]
+            row = explore[explore['Mall Number'].eq(ident)].iloc[0]
             st.subheader(row['Name'])
             st.write(row[['Status', 'Location', 'Property Owner', 'Approximate Size', 'Size Range', 'Confidence', 'Total Parking', 'Floors', 'Remarks']])
             if str(row['Link']).startswith(('https://', 'http://')):
@@ -218,6 +237,9 @@ def main():
                 st.info('No company records available in the workbook for this mall.')
             else:
                 tenants = select(tenants, 'Category', 'Directory categories', 'f_dircats')
+                st.metric('Company records', f'{len(tenants):,}')
+                bar_counts(tenants, 'Category', 'Selected mall categories', limit=len(tenants))
+                bar_counts(tenants, 'Floors', 'Selected mall company floors', limit=len(tenants))
                 table(tenants, 'mall_directory')
     with tabs[3]:
         st.caption('These additional filters affect this company view only.')
@@ -229,7 +251,15 @@ def main():
         if link_mode != 'All':
             cp = cp[cp['Company URL'].ne('') if link_mode == 'Available' else cp['Company URL'].eq('')]
         cp = searches(cp, ['Company Name', 'Category', 'Mall Name', 'Emirates', 'Floors', 'Branches Text', 'Remarks'], 'f_csearch')
-        st.write(f'{len(cp):,} matching company records')
+        a, b, d = st.columns(3)
+        a.metric('Matching company records', f'{len(cp):,}')
+        b.metric('Distinct company-name labels', f'{cp["Company Name"].nunique():,}')
+        d.metric('Malls containing matches', f'{cp["Mall Number"].nunique():,}')
+        st.caption(f'Company links: {cp["Company URL"].ne("").sum():,} available; {cp["Company URL"].eq("").sum():,} missing.')
+        for group in ['Category', 'Mall Name', 'Emirates']:
+            summary = cp.groupby(group).size().rename('Company records').reset_index().sort_values('Company records', ascending=False)
+            st.subheader('Company records by ' + group.lower())
+            table(summary, 'company_group_' + group)
         known = cp['Branch Counts'].dropna()
         st.caption(f'Known branch counts: {len(known):,}; multi-branch records: {known.gt(1).sum():,}. Branch totals are not summed across listings.')
         table(cp, 'company_results', 550)
@@ -243,13 +273,21 @@ def main():
         if len(comparison) < 2:
             st.info('Select at least two malls to compare.')
         if len(comparison):
-            table(comparison[mall_cols], 'mall_comparison')
-            for col in ['Size (sq ft)', 'Total Parking', 'Extracted records']:
+            cat_pool = pool[pool.Category.ne('Uncategorized')]
+            comparison = comparison.copy()
+            comparison['Distinct categories'] = comparison['Mall Number'].map(cat_pool.groupby('Mall Number').Category.nunique()).fillna(0).astype(int)
+            table(comparison[mall_cols + ['Distinct categories']], 'mall_comparison')
+            mix = pool[pool['Mall Number'].isin(selected)].groupby(['Mall Number', 'Category']).size().rename('Company records').reset_index()
+            mix['Mall'] = mix['Mall Number'].map(labels)
+            st.subheader('Category mix')
+            table(mix[['Mall', 'Category', 'Company records']], 'comparison_categories')
+            for col in ['Size (sq ft)', 'Total Parking', 'Floors', 'Extracted records', 'Distinct categories']:
                 st.subheader(col)
                 chart = comparison.copy()
                 chart['Mall'] = chart['Mall Number'].map(labels)
                 st.bar_chart(chart.set_index('Mall')[[col]])
     with tabs[5]:
+        st.metric('Malls without company records', f'{fm["Extracted records"].eq(0).sum():,}')
         rows = []
         for label, df, cols in [('Malls', fm, ['Property Owner', 'Size (sq ft)', 'Floors', 'Total Parking']),
                                 ('Companies', pool, ['Category', 'Floors', 'Branch Counts', 'Company URL'])]:
